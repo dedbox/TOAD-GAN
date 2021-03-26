@@ -8,7 +8,7 @@ from torch.nn.functional import interpolate
 from loguru import logger
 from tqdm import tqdm
 
-import wandb
+# import wandb
 
 from draw_concat import draw_concat
 from generate_noise import generate_spatial_noise
@@ -16,6 +16,9 @@ from mario.level_utils import group_to_token, one_hot_to_ascii_level, token_to_g
 from mario.tokens import TOKEN_GROUPS as MARIO_TOKEN_GROUPS
 from mariokart.tokens import TOKEN_GROUPS as MARIOKART_TOKEN_GROUPS
 from models import calc_gradient_penalty, save_networks
+
+
+import matplotlib.pyplot as plt
 
 
 def update_noise_amplitude(z_prev, real, opt):
@@ -136,13 +139,172 @@ def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scal
             gradient_penalty = calc_gradient_penalty(D, real, fake, opt.lambda_grad, opt.device)
             gradient_penalty.backward(retain_graph=False)
 
+            # blur kernel:
+            # weights = torch.ones((1, 1, 7, 7)).cuda().repeat(1, opt.nc_current, 1, 1) / 49
+
+            # low-gap kernel:
+            gap_weights = torch.tensor(
+                [[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                 [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                 [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                 [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                 [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                 [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1],
+                 [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]]
+            ).cuda()
+            gap_weights = F.normalize(gap_weights)
+            gap_weights=gap_weights.view(1, 1, 7, 7).repeat(1, opt.nc_current, 1, 1)
+
+            # discard top row
+            gap2_weights = torch.tensor(
+                [[0.5, 0.5],
+                 [1.0, 1.0]]
+            ).cuda()
+            gap2_weights=F.normalize(gap2_weights)
+            gap2_weights = gap2_weights.view(1, 1, 2, 2)
+
+            fake_copy = fake.detach().clone()
+            for n in range(opt.nc_current):
+                if n != 2:
+                    fake_copy[:, n, :, :] = 0.
+
+            gap_detector=F.conv2d(fake_copy, gap_weights)
+            gap_detector = F.batch_norm(gap_detector, None, None, training=True)
+            gap2_detector = F.leaky_relu(gap_detector, 0.2)
+            gap2_detector = F.conv2d(gap_detector, gap2_weights)
+            gap2_detector = F.batch_norm(gap2_detector, None, None, training=True)
+            gap2_detector = F.leaky_relu(gap2_detector, 0.2)
+            gap2_detector = F.pad(gap2_detector, (5, 4, 4, 3), "constant", 0.)
+
+            # right-wall kernel:
+            wall_weights = torch.tensor(
+                [[1.0, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0],
+                 [1.0, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0],
+                 [1.0, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0],
+                 [1.0, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0],
+                 [1.0, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0],
+                 [1.0, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0],
+                 [1.0, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0]]
+            ).cuda()
+            wall_weights = F.normalize(wall_weights)
+            wall_weights=wall_weights.view(1, 1, 7, 7).repeat(1, opt.nc_current, 1, 1)
+
+            # sum both rows
+            wall2_weights = torch.tensor(
+                [[1.0, 1.0],
+                 [1.0, 1.0]]
+            ).cuda()
+            wall2_weights=F.normalize(wall2_weights)
+            wall2_weights = wall2_weights.view(1, 1, 2, 2)
+
+            fake_copy = fake.detach().clone()
+            for n in range(opt.nc_current):
+                if n != 2:
+                    fake_copy[:, n, :, :] = 0.
+
+            wall_detector=F.conv2d(fake_copy, wall_weights)
+            wall_detector = F.batch_norm(wall_detector, None, None, training=True)
+            wall2_detector = F.leaky_relu(wall_detector, 0.2)
+            wall2_detector = F.conv2d(wall_detector, wall2_weights)
+            wall2_detector = F.batch_norm(wall2_detector, None, None, training=True)
+            wall2_detector = F.leaky_relu(wall2_detector, 0.2)
+            wall2_detector = F.pad(wall2_detector, (5, 4, 4, 3), "constant", 0.)
+
+            # left-leaning kernel:
+            lean_weights = torch.tensor(
+                [[1.0, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0],
+                 [0.1, 1.0, 0.1, 0.0, 0.0, 0.0, 0.0],
+                 [0.0, 0.1, 1.0, 0.1, 0.0, 0.0, 0.0],
+                 [0.0, 0.0, 0.1, 1.0, 0.1, 0.0, 0.0],
+                 [0.0, 0.0, 0.0, 0.1, 1.0, 0.1, 0.0],
+                 [0.0, 0.0, 0.0, 0.0, 0.1, 1.0, 0.1],
+                 [0.0, 0.0, 0.0, 0.0, 0.0, 0.1, 1.0]]
+            ).cuda()
+            lean_weights = F.normalize(lean_weights)
+            lean_weights=lean_weights.view(1, 1, 7, 7).repeat(1, opt.nc_current, 1, 1)
+
+            # sum the left-leaning diagonal
+            lean2_weights = torch.tensor(
+                [[1.0, 0.0],
+                 [0.0, 1.0]]
+            ).cuda()
+            lean2_weights=F.normalize(lean2_weights)
+            lean2_weights = lean2_weights.view(1, 1, 2, 2)
+
+            fake_copy = fake.detach().clone()
+            for n in range(opt.nc_current):
+                if n != 2:
+                    fake_copy[:, n, :, :] = 0.
+
+            lean_detector=F.conv2d(fake_copy, lean_weights)
+            lean_detector = F.batch_norm(lean_detector, None, None, training=True)
+            lean2_detector = F.leaky_relu(lean_detector, 0.2)
+            lean2_detector = F.conv2d(lean_detector, lean2_weights)
+            lean2_detector = F.batch_norm(lean2_detector, None, None, training=True)
+            lean2_detector = F.leaky_relu(lean2_detector, 0.2)
+            lean2_detector = F.pad(lean2_detector, (5, 4, 4, 3), "constant", 0.)
+
+
+            token_names={
+                '!': 'coin [?]',
+                '#': 'pyramid',
+                '-': 'sky',
+                '1': 'invis. 1 up',
+                '@': 'special [?]',
+                'C': 'coin brick',
+                'S': 'normal brick',
+                'U': 'musrhoom brick',
+                'X': 'ground',
+                'g': 'goomba',
+                'k': 'green koopa',
+                't': 'pipe',
+            }
+
+            # setup plots
+            np_output = fake.cpu().detach().numpy()
+            fig, axs=plt.subplots(opt.nc_current + 3)
+            fig.suptitle(f"Scale {current_scale} Epoch {epoch}")
+
+            # plot level channels
+            for n in range(opt.nc_current):
+                axs[n].get_xaxis().set_visible(False)
+                axs[n].get_yaxis().set_visible(False)
+                # axs[n].set_yticks([])
+                # axs[n].set_yticklabels([])
+                # axs[n].set_ylabel(token_names[opt.token_list[n]], rotation=45)
+                axs[n].text(-0.1, 0.5, token_names[opt.token_list[n]], rotation=0, verticalalignment='center', horizontalalignment='right', transform=axs[n].transAxes)
+                axs[n].imshow(np_output[0, n])
+            
+            # plot gap detector
+            axs[opt.nc_current].get_xaxis().set_visible(False)
+            axs[opt.nc_current].get_yaxis().set_visible(False)
+            axs[opt.nc_current].text(-0.1, 0.5, 'detect gap', rotation=0, verticalalignment='center', horizontalalignment='right', transform=axs[opt.nc_current].transAxes)
+            axs[opt.nc_current].imshow(gap2_detector[0, 0].cpu().detach().numpy())
+            
+            # plot wall detector
+            axs[opt.nc_current + 1].get_xaxis().set_visible(False)
+            axs[opt.nc_current + 1].get_yaxis().set_visible(False)
+            axs[opt.nc_current + 1].text(-0.1, 0.5, 'detect wall', rotation=0, verticalalignment='center', horizontalalignment='right', transform=axs[opt.nc_current + 1].transAxes)
+            axs[opt.nc_current + 1].imshow(wall2_detector[0, 0].cpu().detach().numpy())
+            
+            # plot lean detector
+            axs[opt.nc_current + 2].get_xaxis().set_visible(False)
+            axs[opt.nc_current + 2].get_yaxis().set_visible(False)
+            axs[opt.nc_current + 2].text(-0.1, 0.5, 'detect lean', rotation=0, verticalalignment='center', horizontalalignment='right', transform=axs[opt.nc_current + 2].transAxes)
+            axs[opt.nc_current + 2].imshow(lean2_detector[0, 0].cpu().detach().numpy())
+            
+            # finish plots
+            fig.savefig(f"figs/figure_{current_scale}_{epoch}.png")
+            plt.close(fig)
+
             # Logging:
             if step % 10 == 0:
-                wandb.log({f"D(G(z))@{current_scale}": errD_fake.item(),
-                           f"D(x)@{current_scale}": -errD_real.item(),
-                           f"gradient_penalty@{current_scale}": gradient_penalty.item()
-                           },
-                          step=step, sync=False)
+                pass
+                # wandb.log({f"D(G(z))@{current_scale}": errD_fake.item(),
+                #            f"D(x)@{current_scale}": -errD_real.item(),
+                #            f"gradient_penalty@{current_scale}": gradient_penalty.item()
+                #            },
+                #           step=step, sync=False)
             optimizerD.step()
 
         ############################
@@ -170,9 +332,10 @@ def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scal
 
         # More Logging:
         if step % 10 == 0:
-            wandb.log({f"noise_amplitude@{current_scale}": opt.noise_amp,
-                       f"rec_loss@{current_scale}": rec_loss.item()},
-                      step=step, sync=False, commit=True)
+            pass
+            # wandb.log({f"noise_amplitude@{current_scale}": opt.noise_amp,
+            #            f"rec_loss@{current_scale}": rec_loss.item()},
+            #           step=step, sync=False, commit=True)
 
         # Rendering and logging images of levels
         if epoch % 500 == 0 or epoch == (opt.niter - 1):
@@ -187,15 +350,15 @@ def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scal
                 token_list))
             real_scaled = one_hot_to_ascii_level(real.detach(), token_list)
             img3 = opt.ImgGen.render(real_scaled)
-            wandb.log({f"G(z)@{current_scale}": wandb.Image(img),
-                       f"G(z_opt)@{current_scale}": wandb.Image(img2),
-                       f"real@{current_scale}": wandb.Image(img3)},
-                      sync=False, commit=False)
+            # wandb.log({f"G(z)@{current_scale}": wandb.Image(img),
+            #            f"G(z_opt)@{current_scale}": wandb.Image(img2),
+            #            f"real@{current_scale}": wandb.Image(img3)},
+            #           sync=False, commit=False)
 
-            real_scaled_path = os.path.join(wandb.run.dir, f"real@{current_scale}.txt")
-            with open(real_scaled_path, "w") as f:
-                f.writelines(real_scaled)
-            wandb.save(real_scaled_path)
+            # real_scaled_path = os.path.join(wandb.run.dir, f"real@{current_scale}.txt")
+            # with open(real_scaled_path, "w") as f:
+            #     f.writelines(real_scaled)
+            # wandb.save(real_scaled_path)
 
         # Learning Rate scheduler step
         schedulerD.step()
@@ -204,5 +367,5 @@ def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scal
     # Save networks
     torch.save(z_opt, "%s/z_opt.pth" % opt.outf)
     save_networks(G, D, z_opt, opt)
-    wandb.save(opt.outf)
+    # wandb.save(opt.outf)
     return z_opt, input_from_prev_scale, G

@@ -10,7 +10,7 @@ from mario.special_mario_downsampling import special_mario_downsampling
 from mario.level_utils import read_level, read_level_from_file
 from config import get_arguments, post_config
 from loguru import logger
-import wandb
+# import wandb
 import sys
 import torch
 
@@ -38,9 +38,9 @@ def main():
     opt = post_config(opt)
 
     # Init wandb
-    run = wandb.init(project="mario", tags=get_tags(opt),
-                     config=opt, dir=opt.out)
-    opt.out_ = run.dir
+    # run = wandb.init(project="mario", tags=get_tags(opt),
+    #                  config=opt, dir=opt.out)
+    # opt.out_ = run.dir
 
     # Init game specific inputs
     replace_tokens = {}

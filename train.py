@@ -2,7 +2,7 @@
 import os
 
 import torch
-import wandb
+# import wandb
 from tqdm import tqdm
 
 from mario.level_utils import one_hot_to_ascii_level, token_to_group
@@ -47,7 +47,7 @@ def train(real, opt):
 
     # Log the original input level as an image
     img = opt.ImgGen.render(one_hot_to_ascii_level(real, opt.token_list))
-    wandb.log({"real": wandb.Image(img)}, commit=False)
+    # wandb.log({"real": wandb.Image(img)}, commit=False)
     os.makedirs("%s/state_dicts" % (opt.out_), exist_ok=True)
 
     # Training Loop
@@ -88,10 +88,10 @@ def train(real, opt):
         torch.save(noise_amplitudes, "%s/noise_amplitudes.pth" % (opt.out_))
         torch.save(opt.num_layer, "%s/num_layer.pth" % (opt.out_))
         torch.save(opt.token_list, "%s/token_list.pth" % (opt.out_))
-        wandb.save("%s/*.pth" % opt.out_)
+        # wandb.save("%s/*.pth" % opt.out_)
 
         torch.save(G.state_dict(), "%s/state_dicts/G_%d.pth" % (opt.out_, current_scale))
-        wandb.save("%s/state_dicts/*.pth" % opt.out_)
+        # wandb.save("%s/state_dicts/*.pth" % opt.out_)
 
         del D, G
 
