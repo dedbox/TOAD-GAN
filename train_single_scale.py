@@ -244,6 +244,40 @@ def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scal
             lean2_detector = F.leaky_relu(lean2_detector, 0.2)
             lean2_detector = F.pad(lean2_detector, (5, 4, 4, 3), "constant", 0.)
 
+            # unfilled hole kernel:
+            hole_weights = torch.tensor(
+                [[1.0, -1.0, -1.0, -1.0, -1.0, -1.0, 1.0],
+                 [1.0, -1.0, -1.0, -1.0, -1.0, -1.0, 1.0],
+                 [1.0, -1.0, -1.0, -1.0, -1.0, -1.0, 1.0],
+                 [1.0, -1.0, -1.0, -1.0, -1.0, -1.0, 1.0],
+                 [1.0, -1.0, -1.0, -1.0, -1.0, -1.0, 1.0],
+                 [1.0, -1.0, -1.0, -1.0, -1.0, -1.0, 1.0],
+                 [1.0, -1.0, -1.0, -1.0, -1.0, -1.0, 1.0]]
+            ).cuda() * -1.0
+            hole_weights = F.normalize(hole_weights)
+            hole_weights=hole_weights.view(1, 1, 7, 7).repeat(1, opt.nc_current, 1, 1)
+
+            # sum the left-leaning diagonal
+            hole2_weights = torch.tensor(
+                [[1.0, 0.0],
+                 [0.0, 1.0]]
+            ).cuda()
+            hole2_weights=F.normalize(hole2_weights)
+            hole2_weights = hole2_weights.view(1, 1, 2, 2)
+
+            fake_copy = fake.detach().clone()
+            for n in range(opt.nc_current):
+                if n != 2:
+                    fake_copy[:, n, :, :] = 0.
+
+            hole_detector=F.conv2d(fake_copy, hole_weights)
+            hole_detector = F.batch_norm(hole_detector, None, None, training=True)
+            hole2_detector = F.leaky_relu(hole_detector, 0.2)
+            hole2_detector = F.conv2d(hole_detector, hole2_weights)
+            hole2_detector = F.batch_norm(hole2_detector, None, None, training=True)
+            hole2_detector = F.leaky_relu(hole2_detector, 0.2)
+            hole2_detector = F.pad(hole2_detector, (5, 4, 4, 3), "constant", 0.)
+
 
             token_names={
                 '!': 'coin [?]',
@@ -253,16 +287,21 @@ def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scal
                 '@': 'special [?]',
                 'C': 'coin brick',
                 'S': 'normal brick',
-                'U': 'musrhoom brick',
+                'U': 'mushroom brick',
                 'X': 'ground',
                 'g': 'goomba',
                 'k': 'green koopa',
                 't': 'pipe',
+                '%': 'platform',
+                '|': 'platform bg',
+                'R': 'winged red koopa',
+                'o': 'coin',
+                'r': 'red koopa'
             }
 
             # setup plots
             np_output = fake.cpu().detach().numpy()
-            fig, axs=plt.subplots(opt.nc_current + 3)
+            fig, axs=plt.subplots(opt.nc_current + 4)
             fig.suptitle(f"Scale {current_scale} Epoch {epoch}")
 
             # plot level channels
@@ -292,6 +331,12 @@ def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scal
             axs[opt.nc_current + 2].get_yaxis().set_visible(False)
             axs[opt.nc_current + 2].text(-0.1, 0.5, 'detect lean', rotation=0, verticalalignment='center', horizontalalignment='right', transform=axs[opt.nc_current + 2].transAxes)
             axs[opt.nc_current + 2].imshow(lean2_detector[0, 0].cpu().detach().numpy())
+            
+            # plot hole detector
+            axs[opt.nc_current + 3].get_xaxis().set_visible(False)
+            axs[opt.nc_current + 3].get_yaxis().set_visible(False)
+            axs[opt.nc_current + 3].text(-0.1, 0.5, 'detect hole', rotation=0, verticalalignment='center', horizontalalignment='right', transform=axs[opt.nc_current + 3].transAxes)
+            axs[opt.nc_current + 3].imshow(hole2_detector[0, 0].cpu().detach().numpy())
             
             # finish plots
             fig.savefig(f"figs/figure_{current_scale}_{epoch}.png")
