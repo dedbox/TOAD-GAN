@@ -44,6 +44,14 @@ from mpl_toolkits.axes_grid1 import ImageGrid
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 
+np.set_printoptions(threshold=sys.maxsize)
+
+print("XXX", real.shape)
+print(np.array2string(real.cpu().numpy().astype(int)[0, 2], max_line_width=np.inf))
+exit()
+
+
+
 skymap = real[:, opt.token_list.index('-')]
 B, H, W = skymap.shape
 skymap_patches = skymap.unfold(1, 7, 1).unfold(2, 7, 1).reshape(1, H - 7 + 1, W - 7 + 1, 7*7)
