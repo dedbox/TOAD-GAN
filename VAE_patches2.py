@@ -91,7 +91,7 @@ from torchvision.utils import save_image
 # torch.manual_seed(args.seed)
 
 log_interval = 100
-epochs = 10
+epochs = opt.vae_epochs
 
 device = torch.device("cuda")
 
@@ -107,8 +107,11 @@ device = torch.device("cuda")
 patch_height = 7
 patch_width = 7
 patch_size = patch_height * patch_width
-hidden_layer1_size = 30
-hidden_layer2_size = 7
+
+
+
+hidden_layer1_size = opt.hidden_dim
+hidden_layer2_size = opt.latent_dim
 
 class VAE(nn.Module):
     def __init__(self):
@@ -177,6 +180,7 @@ def loss_function(recon_x, x, mu, logvar):
 def train(epoch):
     model.train()
     train_loss = 0
+    losses = []
     # for batch_idx, (data, _) in enumerate(train_loader):
     for batch_idx, data in enumerate(patches):
         data = data.to(device)
@@ -185,6 +189,7 @@ def train(epoch):
         loss = loss_function(recon_batch, data, mu, logvar)
         loss.backward()
         train_loss += loss.item()
+        losses.append(loss.item())
         optimizer.step()
         if batch_idx % log_interval == 0:
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
@@ -194,6 +199,8 @@ def train(epoch):
 
     print('====> Epoch: {} Average loss: {:.4f}'.format(
           epoch, train_loss / len(patches)))
+    
+    return losses, train_loss / len(patches)
 
 
 # def test(epoch):
@@ -215,9 +222,14 @@ def train(epoch):
 #     test_loss /= D
 #     print('====> Test set loss: {:.4f}'.format(test_loss))
 
+losses = []
+avg_losses = []
+
 # if __name__ == "__main__":
 for epoch in range(1, epochs + 1):
-    train(epoch)
+    loss, avg_loss = train(epoch)
+    losses.append(loss)
+    avg_losses.append(avg_loss)
     # test(epoch)
     with torch.no_grad():
         # sample = torch.randn(1, 1, hidden_layer2_size).to(device)
@@ -247,16 +259,22 @@ for epoch in range(1, epochs + 1):
         # # plt.savefig(f'pca_{opt.input_name[:-4]}.png', bbox_inches='tight', pad_inches=0.1)
         # plt.show()
 
-        fig = plt.figure(figsize=(cols * 1.1, rows * 1.4))
-        grid = ImageGrid(fig, 111, nrows_ncols=(rows, cols), axes_pad=(0.1, 0.4))
+        if opt.vae_show:
+            fig = plt.figure(figsize=(cols * 1.1, rows * 1.4))
+            grid = ImageGrid(fig, 111, nrows_ncols=(rows, cols), axes_pad=(0.1, 0.4))
 
-        # fig.suptitle(f'PCA Top {K} of {N} ({int(100*precision)}% total variance)')
-        for k, ax, img in zip(range(K), grid, samples):
-            ax.axis('off')
-            ax.set_title(f'{k+1}')
-            ax.imshow(img.reshape((7, 7)), cmap='magma')
-        for i in range(K, rows * cols):
-            grid[i].set_visible(False)
-        fig.tight_layout()
-        # plt.savefig(f'pca_{opt.input_name[:-4]}.png', bbox_inches='tight', pad_inches=0.1)
-        plt.show()
+            fig.suptitle(f'VAE {K} Random Samples, H={opt.hidden_dim}, L={opt.latent_dim}')
+            for k, ax, img in zip(range(K), grid, samples):
+                ax.axis('off')
+                ax.set_title(f'{k+1}')
+                ax.imshow(img.reshape((7, 7)), cmap='magma')
+            for i in range(K, rows * cols):
+                grid[i].set_visible(False)
+            fig.tight_layout()
+            if opt.vae_save:
+                plt.savefig(f'vae-{opt.input_name[:-4]}-{opt.hidden_dim}-{opt.latent_dim}-{epoch}.png', bbox_inches='tight', pad_inches=0.1)
+            else:
+                plt.show()
+
+if opt.vae_save:
+    np.savez(f"vae-{opt.input_name[:-4]}-{opt.hidden_dim}-{opt.latent_dim}", loss=np.array(losses), avg_loss=np.array(avg_losses))
