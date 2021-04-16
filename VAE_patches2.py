@@ -277,4 +277,4 @@ for epoch in range(1, epochs + 1):
                 plt.show()
 
 if opt.vae_save:
-    np.savez(f"vae-{opt.input_name[:-4]}-{opt.hidden_dim}-{opt.latent_dim}", loss=np.array(losses), avg_loss=np.array(avg_losses))
+    np.savez(f"vae-{opt.input_name[:-4]}-{opt.hidden_dim}-{opt.latent_dim}", loss=np.array(losses), avg_loss=np.array(avg_losses), model=model.state_dict())
