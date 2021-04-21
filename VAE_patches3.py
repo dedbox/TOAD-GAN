@@ -15,7 +15,7 @@ import numpy as np
 
 import matplotlib.pyplot as plt
 
-from ToadVAE import LevelPatchesDataset, ToadPatchVAE
+from ToadVAE import LevelPatchesDataset, ToadPatchVAE, ToadLevelVAE
 
 
 ################################################################################
@@ -61,7 +61,7 @@ LATENT_SIZE = 7
 
 # training
 BATCH_SIZE = 1
-EPOCHS = 100
+EPOCHS = 200
 # MAX_LOSS = 300
 LOG_INTERVAL = 10
 
@@ -76,7 +76,8 @@ dataset = LevelPatchesDataset(real, patch_size=(PATCH_SIZE, PATCH_SIZE))
 patches = torch.utils.data.DataLoader(
     dataset, batch_size=BATCH_SIZE, shuffle=True)
 
-model = ToadPatchVAE(C, PATCH_SIZE, LATENT_SIZE).cuda()
+# model = ToadPatchVAE(C, PATCH_SIZE, LATENT_SIZE).cuda()
+model = ToadLevelVAE(C, PATCH_SIZE, LATENT_SIZE).cuda()
 optimizer = optim.Adam(model.parameters(), lr=1e-3)
 print(model)
 
