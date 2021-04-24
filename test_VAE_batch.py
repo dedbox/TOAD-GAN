@@ -19,12 +19,12 @@ import matplotlib.pyplot as plt
 # TOAD-GAN
 
 # Logger init
-logger.remove()
-logger.add(sys.stdout, colorize=True,
-           format="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
-           + "<level>{level}</level> | "
-           + "<light-black>{file.path}:{line}</light-black> | "
-           + "{message}")
+# logger.remove()
+# logger.add(sys.stdout, colorize=True,
+#            format="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
+#            + "<level>{level}</level> | "
+#            + "<light-black>{file.path}:{line}</light-black> | "
+#            + "{message}")
 
 # Parse arguments
 opt = get_arguments().parse_args()
@@ -49,6 +49,10 @@ else:
 def load(level_name):
     opt.input_name = level_name
     real = read_level(opt, None, replace_tokens).to(opt.device)
+    # Remove the sky layer
+    real1 = real[:, :2]
+    real2 = real[:, 3:]
+    real = torch.cat((real1, real2), dim=1)
     return real
 
 ################################################################################
@@ -93,9 +97,11 @@ class VAE(nn.Module):
         z = self.reparameterize(mu, logvar)
         return self.decode(z), mu, logvar
 
+
 BATCH_SIZE = 1
 EPOCHS = 300
 LOG_INTERVAL = 10
+
 
 def run(real):
     N, C, H, W = real.shape
@@ -103,7 +109,7 @@ def run(real):
 
     INPUT_SIZE = H * W
     HIDDEN_SIZE = 4*(H-4)*(W-4)  # opt.hidden_dim
-    LATENT_SIZE = 7  # opt.latent_dim
+    LATENT_SIZE = 1  # opt.latent_dim
 
     NUM_SAMPLES = 10
 
@@ -142,9 +148,10 @@ def run(real):
 
     return mu, logvar
 
+
 models = []
 for level_name in ['lvl_1-1.txt', 'lvl_1-2.txt', 'lvl_1-3.txt']:
-    real = load('lvl_1-1.txt')
+    real = load(level_name)
     level_models = []
     for n in range(20):
         mu, logvar = run(real)
@@ -157,4 +164,4 @@ models = np.array(models)
 print("DONE!")
 print(models.shape)
 
-np.save(f'vae-models-{EPOCHS}', models)
+np.save(f'vae-models-nosky-L1-{EPOCHS}', models)
