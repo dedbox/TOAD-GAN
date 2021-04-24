@@ -212,6 +212,14 @@ class LevelPatchesDataset(torch.utils.data.Dataset):
 input_names = ['1-1', '1-2', '1-3', '2-1', '3-1', '3-3', '4-1',
                '4-2', '5-1', '5-3', '6-1', '6-2', '6-3', '7-1', '8-1']
 
+# # render the real levels
+# for input_name in input_names:
+#     opt.input_name = f'lvl_{input_name}.txt'
+#     real = read_level(opt).to(opt.device)
+#     ascii_real = one_hot_to_ascii_level(real, opt.token_list)
+#     real_level = opt.ImgGen.render(ascii_real)
+#     real_level.save(f'output/lvl_{input_name}.png', format='png')
+
 # Load all levels
 reals = {}
 normalize = {}
@@ -266,19 +274,63 @@ for input_name in input_names:
     detectors[input_name] = detector
 
 
-def divergence(a, b):
+def difference(a, b):
     H_a, W_a = a.shape[2:]
     H_b, W_b = b.shape[2:]
     H = max(H_a, H_b)
     W = max(W_a, W_b)
     A = F.pad(a, (0, W - W_a, 0, H - H_a))
     B = F.pad(b, (0, W - W_b, 0, H - H_b))
-    return torch.linalg.norm(B - A).item()
+    return A - B, A, B
 
 
-N = len(input_names)
+def divergence(a, b):
+    diff, _, _ = difference(a, b)
+    return torch.linalg.norm(diff).item()
+
+
+# visualize detector outputs
+for input_name1 in input_names:
+    detector = detectors[input_name1]
+    for input_name2 in input_names:
+        x1 = reals[input_name1]
+        x2 = reals[input_name2]
+        y = detector(x2)
+        w = detector(reals[input_name1])
+        _, y, w = difference(y, w)
+        d = divergence(w, y)
+        dw = torch.abs(y - w)
+        z = torch.sum(y, dim=2)
+        z = (z - z.mean()) / z.std()
+
+        y = F.interpolate(y, (y.shape[2], x2.shape[3]))
+        dw = F.interpolate(dw, (dw.shape[2], x1.shape[3]))
+
+        x1 = x1[0, 0].detach().cpu().numpy()
+        x2 = x2[0, 0].detach().cpu().numpy()
+        y = y[0, 0].detach().cpu().numpy()
+        z = z[0].detach().cpu().numpy()
+        dw = dw[0, 0].detach().cpu().numpy()
+
+        fig = plt.figure(figsize=(W / 10, 10 + 0.2 * H))
+        grid = ImageGrid(fig, 111, nrows_ncols=(5, 1), axes_pad=(0.1, 0.1))
+        fig.suptitle(
+            f'divergence({input_name1}, {input_name2}) = {d:.2f}', fontsize=30)
+        for ax, img, cmap in zip(grid, [x2, z, y, x1, dw], ['tab20b', 'magma', 'viridis', 'tab20b', 'magma']):
+            ax.axis('off')
+            ax.imshow(img, cmap=cmap)
+        fig.tight_layout()
+        plt.subplots_adjust(top=0.92)
+        plt.savefig(rf'PCA_Detector_output\detector_{input_name1}_level_{input_name2}.png',
+                    bbox_inches='tight', pad_inches=0.1)
+        plt.close()
+        # plt.show()
+        # exit()
+
+# exit()
 
 # Compute divergence between input pairs
+N = len(input_names)
 data = np.zeros((N, N))
 for i, input_name1 in enumerate(input_names):
     for j, input_name2 in enumerate(input_names):
@@ -286,190 +338,9 @@ for i, input_name1 in enumerate(input_names):
         b = detectors[input_name1](reals[input_name2])
         data[i, j] = divergence(a, b)
 
-plt.imshow(data, interpolation='nearest', extent=[0, N, 0, N])
-# plt.axis(False)
-plt.xticks([i + 0.5 for i in range(N)], input_names)
-plt.yticks([i + 0.5 for i in range(N)], reversed(input_names))
+plt.imshow(data, interpolation='nearest', extent=[0, 2*N, 0, 2*N])
+plt.xticks([2*i + 1 for i in range(N)], input_names, rotation=45)
+plt.yticks([2*i + 1 for i in range(N)], reversed(input_names))
+plt.savefig(f'pca-detector-2d-intensities.png',
+            bbox_inches='tight', pad_inches=0.1)
 plt.show()
-plt.savefig()
-
-exit()
-
-y = model(real0).to(device)
-y = F.interpolate(y, (y.shape[2], W))
-z1 = torch.sum(y, dim=2)
-z1 = (z1 - z1.mean()) / z1.std()
-z2 = torch.sum(y)
-
-# Undo one-hot encoding
-# y = y.argmax(dim=1).unsqueeze(1).float()
-
-x = real0[0, 0].detach().cpu().numpy()
-y = y[0, 0].detach().cpu().numpy()
-z1 = z1[0].detach().cpu().numpy()
-z2 = z2.item()
-
-print("x", x.shape, "mean", x.mean(), "std", x.std())
-print(x)
-
-print("z1", z1.shape, "mean", z1.mean(), "std", z1.std())
-print(z1)
-
-print("z2", z2)
-
-fig = plt.figure(figsize=(W, H + len(principals)))
-grid = ImageGrid(fig, 111, nrows_ncols=(3, 1), axes_pad=(0.1, 0.1))
-for ax, img, cmap in zip(grid, [x, z1, y], ['tab20b', 'magma', 'magma']):
-    ax.axis('off')
-    ax.imshow(img, cmap=cmap)
-fig.tight_layout()
-plt.show()
-
-exit()
-
-
-# Apply top-K eigenpatches as kernels
-real1 = real0.detach().cpu().numpy()[0, 0]
-
-K = 9
-
-detectors = []
-for k in range(K):
-    detector = signal.convolve2d(
-        real1, principals[k], mode='same', boundary='symm')
-    detector = torch.tensor(detector).to(opt.device).reshape(1, 1, H, W)
-    detector = F.avg_pool2d(detector, 2)
-    detector = F.interpolate(detector, (H, W))
-    detector = F.relu(detector)
-    detector = detector[0, 0].detach().cpu().numpy()
-    detector = signal.convolve2d(
-        real1, principals[k], mode='same', boundary='symm')
-    detector = torch.tensor(detector).to(opt.device).reshape(1, 1, H, W)
-    detector = F.avg_pool2d(detector, 4)
-    detector = F.interpolate(detector, (H, W))
-    detector = F.relu(detector)
-    # detector = detector.mean(dim=2).unsqueeze(2)
-    # detector = detector.repeat(1, 1, H, 1)
-    detector = detector[0, 0].detach().cpu().numpy()
-    detectors.append(detector)
-
-tmp = np.array(detectors).sum(axis=0)
-# tmp = np.tile(tmp, (H, 1))
-
-rows, cols = (2, 1)
-
-fig = plt.figure(figsize=(cols * 1.1, rows * 1.1))
-grid = ImageGrid(fig, 111, nrows_ncols=(rows, cols), axes_pad=(0.1, 0.4))
-
-for k, ax, img, cmap in zip(range(2), grid, [real1, tmp], ['tab20b', 'magma']):
-    ax.axis('off')
-    ax.imshow(img, cmap=cmap)
-fig.tight_layout()
-plt.show()
-# exit()
-
-# Plot eignepatches
-
-rows, cols = (1, K)
-
-fig = plt.figure(figsize=(cols * 1.1, rows * 1.4))
-grid = ImageGrid(fig, 111, nrows_ncols=(rows, cols), axes_pad=(0.1, 0.4))
-
-# fig.suptitle(f'VAE {K} Random Samples, H={opt.hidden_dim}, L={opt.latent_dim}')
-for k, ax, img in zip(range(K), grid, principals):
-    ax.axis('off')
-    # ax.set_title(f'{k+1}')
-    ax.imshow(img, cmap='magma')
-# for i in range(K, rows * cols):
-#     grid[i].set_visible(False)
-fig.tight_layout()
-# if opt.vae_save:
-#     plt.savefig(f'vae-{opt.input_name[:-4]}-{opt.hidden_dim}-{opt.latent_dim}-{epoch}.png', bbox_inches='tight', pad_inches=0.1)
-# else:
-plt.show(block=False)
-
-# Plot the outputs
-
-# rows, cols = (int((K+1) / 2 + 0.5), 2)
-rows, cols = (K+1, 1)
-
-fig = plt.figure(figsize=(cols * 1.1, rows * 1.1))
-grid = ImageGrid(fig, 111, nrows_ncols=(rows, cols), axes_pad=(0.1, 0.4))
-
-# fig.suptitle(f'VAE {K} Random Samples, H={opt.hidden_dim}, L={opt.latent_dim}')
-for k, ax, img, cmap in zip(range(K+1), grid, [real1] + detectors, ['tab20b'] + ['magma'] * K):
-    ax.axis('off')
-    # ax.set_title(f'{k+1}')
-    ax.imshow(img, cmap=cmap)
-# for i in range(K, rows * cols):
-#     grid[i].set_visible(False)
-fig.tight_layout()
-# if opt.vae_save:
-#     plt.savefig(f'vae-{opt.input_name[:-4]}-{opt.hidden_dim}-{opt.latent_dim}-{epoch}.png', bbox_inches='tight', pad_inches=0.1)
-# else:
-plt.show()
-
-exit()
-
-# # Cut the level up into overlapping patches
-# dataset = LevelPatchesDataset(real0, (opt.kernel_height, opt.kernel_width))
-# patches = torch.utils.data.DataLoader(
-#     dataset, batch_size=1, shuffle=True)
-# print(next(iter(dataset)))
-# exit()
-
-# # Build the model
-# model = PlayCNN(real).to(opt.device)
-# print(model)
-
-# # Configure the learning process
-# criterion = nn.BCELoss()
-# optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-
-# # Train the model
-# model.train()
-
-# losses = []
-# for epoch in range(500):
-#     optimizer.zero_grad()
-#     y = model.forward(real)
-#     loss = criterion(y, real)
-#     loss.backward()
-#     optimizer.step()
-#     losses.append(loss.item())
-#     print("loss", loss.item())
-
-# plt.title('Loss')
-# plt.xlabel('iteration')
-# plt.plot(losses)
-# plt.show()
-
-# # Use the model
-# model.eval()
-
-# pred = model(real).detach().cpu().numpy()
-# #  F.one_hot(model(real).argmax(dim=1)).transpose(2, 3).transpose(1, 2)
-
-# # render the real level
-# ascii_real = one_hot_to_ascii_level(real, opt.token_list)
-# real_level = opt.ImgGen.render(ascii_real)
-# real_rgb = np.array(real_level) / 255
-
-# # render the predicted level
-# ascii_pred = one_hot_to_ascii_level(pred, opt.token_list)
-# pred_level = opt.ImgGen.render(ascii_pred)
-# pred_rgb = np.array(pred_level)
-
-# # # render the final visualization
-# # plt.figure(figsize=(real.shape[2], real.shape[3]))
-# # plt.imshow(real_rgb)
-# # plt.axis('off')
-# # plt.tight_layout()
-# # plt.show()
-
-# # render the final visualization
-# plt.figure(figsize=(pred.shape[2], pred.shape[3]))
-# plt.imshow(pred_rgb)
-# plt.axis('off')
-# plt.tight_layout()
-# plt.show()
