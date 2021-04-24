@@ -20,7 +20,7 @@ from models import calc_gradient_penalty, save_networks
 
 import matplotlib.pyplot as plt
 
-from PCA_Detector import PCA_Detector, difference, divergence
+from PCA_Detector import PCA_Detector, unify_shapes, divergence
 
 
 def update_noise_amplitude(z_prev, real, opt):
@@ -56,9 +56,10 @@ def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scal
     scale = opt.scales[current_scale] if current_scale < len(opt.scales) else 1
     # print("AAA", current_scale, opt.scales, int(7 * opt.scales[current_scale]))
 
-    detector = PCA_Detector(opt, real0, (int(7 * scale + 0.5), int(7 * scale + 0.5)))
+    detector = PCA_Detector(opt, 'real', real0, (int(7 * scale + 0.5), int(7 * scale + 0.5)))
     real_detection_map = detector(real0)
-    print("XXX", real_detection_map.shape)
+    divergences = []
+    logger.info("real_detection_map.shape = {}", real_detection_map.shape)
 
     if opt.game == 'mario':
         token_group = MARIO_TOKEN_GROUPS
@@ -182,8 +183,6 @@ def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scal
             G.zero_grad()
             fake = G(noise.detach(), prev.detach(), temperature=1 if current_scale != opt.token_insert else 1)
             output = D(fake)
-            fake_detection_map = detector(preprocess(opt, fake))
-            print("DDD", divergence(real_detection_map, fake_detection_map))
 
             errG = -output.mean()
             errG.backward(retain_graph=False)
@@ -200,8 +199,12 @@ def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scal
             optimizerG.step()
 
         # More Logging:
-        if step % 10 == 0:
+        div = divergence(real_detection_map, preprocess(opt, fake))
+        divergences.append(div)
+        logger.info("divergence(fake) = {}", div)
+        if step % 1000 == 0:
             pass
+            # detector.visualize('fake', preprocess(opt, fake))
             # wandb.log({f"noise_amplitude@{current_scale}": opt.noise_amp,
             #            f"rec_loss@{current_scale}": rec_loss.item()},
             #           step=step, sync=False, commit=True)
@@ -232,9 +235,14 @@ def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scal
         # Learning Rate scheduler step
         schedulerD.step()
         schedulerG.step()
-
+    
+    # detector.visualize('z_opt', preprocess(z_opt, fake))
+    div = divergence(real_detection_map, preprocess(opt, z_opt))
+    divergences.append(div)
+    logger.info("divergence(z_opt) = {}", div)
+    
     # Save networks
     torch.save(z_opt, "%s/z_opt.pth" % opt.outf)
     save_networks(G, D, z_opt, opt)
     # wandb.save(opt.outf)
-    return z_opt, input_from_prev_scale, G
+    return z_opt, input_from_prev_scale, G, divergences

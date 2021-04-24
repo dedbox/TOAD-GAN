@@ -51,6 +51,7 @@ def train(real, opt):
     os.makedirs("%s/state_dicts" % (opt.out_), exist_ok=True)
 
     # Training Loop
+    divergences = []
     for current_scale in range(0, stop_scale):
         opt.outf = "%s/%d" % (opt.out_, current_scale)
         try:
@@ -69,8 +70,9 @@ def train(real, opt):
             D, G = restore_weights(D, G, current_scale, opt)
 
         # Actually train the current scale
-        z_opt, input_from_prev_scale, G = train_single_scale(D,  G, reals, generators, noise_maps,
-                                                             input_from_prev_scale, noise_amplitudes, opt)
+        z_opt, input_from_prev_scale, G, divs = train_single_scale(
+            D,  G, reals, generators, noise_maps, input_from_prev_scale,
+            noise_amplitudes, opt)
 
         # Reset grads and save current scale
         G = reset_grads(G, False)
@@ -81,6 +83,7 @@ def train(real, opt):
         generators.append(G)
         noise_maps.append(z_opt)
         noise_amplitudes.append(opt.noise_amp)
+        divergences.append(divs)
 
         torch.save(noise_maps, "%s/noise_maps.pth" % (opt.out_))
         torch.save(generators, "%s/generators.pth" % (opt.out_))
@@ -94,5 +97,7 @@ def train(real, opt):
         # wandb.save("%s/state_dicts/*.pth" % opt.out_)
 
         del D, G
+
+    torch.save(torch.tensor(divergences), "%s/divergences.pth" % opt.out_)
 
     return generators, noise_maps, reals, noise_amplitudes
