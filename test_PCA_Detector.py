@@ -13,7 +13,7 @@ from mario.tokens import REPLACE_TOKENS
 from mario.level_image_gen import LevelImageGen
 from mario.special_mario_downsampling import special_mario_downsampling
 
-from PCA_Detector import PCA_Detector, difference, divergence
+from PCA_Detector import PCA_Detector, unify_shapes, divergence
 
 ################################################################################
 # PyTorch
@@ -178,7 +178,8 @@ for input_name in input_names:
 detectors = {}
 for input_name in input_names:
     real = reals[input_name]
-    detectors[input_name] = PCA_Detector(opt, reals[input_name], (7, 7))
+    detectors[input_name] = PCA_Detector(
+        opt, input_name, reals[input_name], (7, 7))
 
 # Compute pairwise divergence
 N = len(input_names)
@@ -187,8 +188,7 @@ for i, input_name1 in enumerate(input_names):
     for j, input_name2 in enumerate(input_names):
         a = detectors[input_name1](reals[input_name1])
         b = detectors[input_name1](reals[input_name2])
-        # data[i, j] = np.exp(divergence(a, b)) - 1
-        data[i, j] = divergence(a, b)
+        data[j, i] = np.exp(divergence(a, b)) - 1
 
 plt.imshow(data, interpolation='nearest', extent=[0, 2*N, 0, 2*N])
 plt.xticks([2*i + 1 for i in range(N)], input_names, rotation=45)
@@ -199,41 +199,8 @@ plt.show()
 
 # visualize detector outputs
 for input_name1 in input_names:
-    detector = detectors[input_name1]
     for input_name2 in input_names:
-        x1 = reals[input_name1]
-        x2 = reals[input_name2]
-        y = detector(x2)
-        w = detector(reals[input_name1])
-        _, y, w = difference(y, w)
-        d = divergence(w, y)
-        dw = torch.abs(y - w)
-        z = torch.sum(y, dim=2)
-        z = (z - z.mean()) / z.std()
-
-        H = max(x1.shape[2], x2.shape[2])
-        W = max(x1.shape[3], x2.shape[3])
-
-        y = F.interpolate(y, (y.shape[2], W))
-        dw = F.interpolate(dw, (dw.shape[2], W))
-
-        x1 = x1[0, 0].detach().cpu().numpy()
-        x2 = x2[0, 0].detach().cpu().numpy()
-        y = y[0, 0].detach().cpu().numpy()
-        z = z[0].detach().cpu().numpy()
-        dw = dw[0, 0].detach().cpu().numpy()
-
-        fig = plt.figure(figsize=(W / 10, 10 + 0.2 * H))
-        grid = ImageGrid(fig, 111, nrows_ncols=(5, 1), axes_pad=(0.1, 0.1))
-        fig.suptitle(
-            f'divergence({input_name1}, {input_name2}) = {d:.2f}', fontsize=30)
-        for ax, img, cmap in zip(grid, [x2, z, y, x1, dw], ['tab20b', 'magma', 'viridis', 'tab20b', 'magma']):
-            ax.axis('off')
-            ax.imshow(img, cmap=cmap)
-        fig.tight_layout()
-        plt.subplots_adjust(top=0.92)
-        # plt.savefig(rf'PCA_Detector_output\detector_{input_name1}_level_{input_name2}.png',
-        #             bbox_inches='tight', pad_inches=0.1)
-        plt.show()
-        plt.close()
-        # exit()
+        detectors[input_name1].visualize(
+            input_name2,
+            reals[input_name2],
+            )# rf'PCA_Detector_output\detector_{input_name1}_level_{input_name2}.png')
