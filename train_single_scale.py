@@ -20,11 +20,24 @@ from models import calc_gradient_penalty, save_networks
 
 import matplotlib.pyplot as plt
 
+from PCA_Detector import PCA_Detector, difference, divergence
+
 
 def update_noise_amplitude(z_prev, real, opt):
     """ Update the amplitude of the noise for the current scale according to the previous noise map. """
     RMSE = torch.sqrt(F.mse_loss(real, z_prev))
     return opt.noise_update * RMSE
+
+
+def preprocess(opt, level):
+    # remove the sky layer
+    sky_index = opt.token_list.index('-')
+    before_sky = level[:, :sky_index]
+    after_sky = level[:, sky_index+1:]
+    level = torch.cat((before_sky, after_sky), dim=1)
+    # Undo one-hot encoding
+    level = level.argmax(dim=1).unsqueeze(1).float()
+    return level
 
 
 def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scale, noise_amplitudes, opt):
@@ -34,6 +47,18 @@ def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scal
     the amplitudes for the noise in all the scales. opt is a namespace that holds all necessary parameters. """
     current_scale = len(generators)
     real = reals[current_scale]
+
+    # Initialize real detector
+    real0 = preprocess(opt, real)
+    N, C, H, W = real0.shape
+
+    # print("real0", real0.shape)
+    scale = opt.scales[current_scale] if current_scale < len(opt.scales) else 1
+    # print("AAA", current_scale, opt.scales, int(7 * opt.scales[current_scale]))
+
+    detector = PCA_Detector(opt, real0, (int(7 * scale + 0.5), int(7 * scale + 0.5)))
+    real_detection_map = detector(real0)
+    print("XXX", real_detection_map.shape)
 
     if opt.game == 'mario':
         token_group = MARIO_TOKEN_GROUPS
@@ -157,6 +182,8 @@ def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scal
             G.zero_grad()
             fake = G(noise.detach(), prev.detach(), temperature=1 if current_scale != opt.token_insert else 1)
             output = D(fake)
+            fake_detection_map = detector(preprocess(opt, fake))
+            print("DDD", divergence(real_detection_map, fake_detection_map))
 
             errG = -output.mean()
             errG.backward(retain_graph=False)
