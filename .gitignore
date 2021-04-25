@@ -11,3 +11,6 @@ slurm-*
 /input/umap_images/old_baselines
 /input/umap_images/unused
 /fig*
+*.png
+*.pth
+Pipfile
