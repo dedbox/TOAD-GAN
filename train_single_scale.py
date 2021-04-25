@@ -8,7 +8,7 @@ from torch.nn.functional import interpolate
 from loguru import logger
 from tqdm import tqdm
 
-# import wandb
+import wandb
 
 from draw_concat import draw_concat
 from generate_noise import generate_spatial_noise
@@ -29,12 +29,13 @@ def update_noise_amplitude(z_prev, real, opt):
     return opt.noise_update * RMSE
 
 
-def preprocess(opt, level):
+def preprocess(opt, level, keepSky=False):
     # remove the sky layer
-    sky_index = opt.token_list.index('-')
-    before_sky = level[:, :sky_index]
-    after_sky = level[:, sky_index+1:]
-    level = torch.cat((before_sky, after_sky), dim=1)
+    if not keepSky:
+        sky_index = opt.token_list.index('-')
+        before_sky = level[:, :sky_index]
+        after_sky = level[:, sky_index+1:]
+        level = torch.cat((before_sky, after_sky), dim=1)
     # Undo one-hot encoding
     level = level.argmax(dim=1).unsqueeze(1).float()
     return level
@@ -48,18 +49,24 @@ def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scal
     current_scale = len(generators)
     real = reals[current_scale]
 
+    keepSky=False
+    kernel_dims = (2, 2)
+
     # Initialize real detector
-    real0 = preprocess(opt, real)
+    real0 = preprocess(opt, real, keepSky)
     N, C, H, W = real0.shape
 
     # print("real0", real0.shape)
     scale = opt.scales[current_scale] if current_scale < len(opt.scales) else 1
     # print("AAA", current_scale, opt.scales, int(7 * opt.scales[current_scale]))
 
-    detector = PCA_Detector(opt, 'real', real0, (int(7 * scale + 0.5), int(7 * scale + 0.5)))
+    detector = PCA_Detector(opt, 'real', real0, kernel_dims)
     real_detection_map = detector(real0)
+    detection_scale = torch.max(real_detection_map)
+    real_detection_map /= detection_scale
+    real1 = torch.cat([real, F.interpolate(real_detection_map, (H, W))], dim=1)
     divergences = []
-    logger.info("real_detection_map.shape = {}", real_detection_map.shape)
+    # logger.info("real_detection_map.shape = {}", real_detection_map.shape)
 
     if opt.game == 'mario':
         token_group = MARIO_TOKEN_GROUPS
@@ -104,7 +111,7 @@ def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scal
             # train with real
             D.zero_grad()
 
-            output = D(real).to(opt.device)
+            output = D(real1).to(opt.device)
 
             errD_real = -output.mean()
             errD_real.backward(retain_graph=True)
@@ -127,7 +134,7 @@ def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scal
                     if current_scale == (opt.token_insert + 1):
                         prev = group_to_token(prev, opt.token_list, token_group)
 
-                    prev = interpolate(prev, real.shape[-2:], mode="bilinear", align_corners=False)
+                    prev = interpolate(prev, real1.shape[-2:], mode="bilinear", align_corners=False)
                     prev = pad_image(prev)
                     z_prev = draw_concat(generators, noise_maps, reals, noise_amplitudes, input_from_prev_scale,
                                          "rec", pad_noise, pad_image, opt)
@@ -136,8 +143,8 @@ def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scal
                     if current_scale == (opt.token_insert + 1):
                         z_prev = group_to_token(z_prev, opt.token_list, token_group)
 
-                    z_prev = interpolate(z_prev, real.shape[-2:], mode="bilinear", align_corners=False)
-                    opt.noise_amp = update_noise_amplitude(z_prev, real, opt)
+                    z_prev = interpolate(z_prev, real1.shape[-2:], mode="bilinear", align_corners=False)
+                    opt.noise_amp = update_noise_amplitude(z_prev, real1[:, :-1], opt)
                     z_prev = pad_image(z_prev)
             else:  # Any other step
                 prev = draw_concat(generators, noise_maps, reals, noise_amplitudes, input_from_prev_scale,
@@ -147,32 +154,36 @@ def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scal
                 if current_scale == (opt.token_insert + 1):
                     prev = group_to_token(prev, opt.token_list, token_group)
 
-                prev = interpolate(prev, real.shape[-2:], mode="bilinear", align_corners=False)
+                prev = interpolate(prev, real1.shape[-2:], mode="bilinear", align_corners=False)
                 prev = pad_image(prev)
 
             # After creating our correct noise input, we feed it to the generator:
             noise = opt.noise_amp * noise_ + prev
             fake = G(noise.detach(), prev, temperature=1 if current_scale != opt.token_insert else 1)
 
+            fake0 = preprocess(opt, fake, keepSky)
+            Nf, Cf, Hf, Wf = fake0.shape
+            fake_detection_map = detector(fake0) / detection_scale
+            fake1 = torch.cat([fake, F.interpolate(fake_detection_map, (Hf, Wf))], dim=1)
+
             # Then run the result through the discriminator
-            output = D(fake.detach())
+            output = D(fake1.detach())
             errD_fake = output.mean()
 
             # Backpropagation
             errD_fake.backward(retain_graph=False)
 
             # Gradient Penalty
-            gradient_penalty = calc_gradient_penalty(D, real, fake, opt.lambda_grad, opt.device)
+            gradient_penalty = calc_gradient_penalty(D, real1, fake1, opt.lambda_grad, opt.device)
             gradient_penalty.backward(retain_graph=False)
 
             # Logging:
             if step % 10 == 0:
-                pass
-                # wandb.log({f"D(G(z))@{current_scale}": errD_fake.item(),
-                #            f"D(x)@{current_scale}": -errD_real.item(),
-                #            f"gradient_penalty@{current_scale}": gradient_penalty.item()
-                #            },
-                #           step=step, sync=False)
+                wandb.log({f"D(G(z))@{current_scale}": errD_fake.item(),
+                           f"D(x)@{current_scale}": -errD_real.item(),
+                           f"gradient_penalty@{current_scale}": gradient_penalty.item()
+                           },
+                          step=step, sync=False)
             optimizerD.step()
 
         ############################
@@ -182,7 +193,13 @@ def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scal
         for j in range(opt.Gsteps):
             G.zero_grad()
             fake = G(noise.detach(), prev.detach(), temperature=1 if current_scale != opt.token_insert else 1)
-            output = D(fake)
+
+            fake0 = preprocess(opt, fake, keepSky)
+            Nf, Cf, Hf, Wf = fake0.shape
+            fake_detection_map = detector(fake0) / detection_scale
+            fake1 = torch.cat([fake, F.interpolate(fake_detection_map, (Hf, Wf))], dim=1)
+
+            output = D(fake1)
 
             errG = -output.mean()
             errG.backward(retain_graph=False)
@@ -199,15 +216,14 @@ def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scal
             optimizerG.step()
 
         # More Logging:
-        div = divergence(real_detection_map, preprocess(opt, fake))
+        div = divergence(real_detection_map, preprocess(opt, fake, keepSky))
         divergences.append(div)
-        logger.info("divergence(fake) = {}", div)
-        if step % 1000 == 0:
-            pass
+        # logger.info("divergence(fake) = {}", div)
+        if step % 10 == 0:
             # detector.visualize('fake', preprocess(opt, fake))
-            # wandb.log({f"noise_amplitude@{current_scale}": opt.noise_amp,
-            #            f"rec_loss@{current_scale}": rec_loss.item()},
-            #           step=step, sync=False, commit=True)
+            wandb.log({f"noise_amplitude@{current_scale}": opt.noise_amp,
+                       f"rec_loss@{current_scale}": rec_loss.item()},
+                      step=step, sync=False, commit=True)
 
         # Rendering and logging images of levels
         if epoch % 500 == 0 or epoch == (opt.niter - 1):
@@ -216,33 +232,33 @@ def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scal
             else:
                 token_list = opt.token_list
 
-            img = opt.ImgGen.render(one_hot_to_ascii_level(fake.detach(), token_list))
+            img = opt.ImgGen.render(one_hot_to_ascii_level(fake1[:, :-1].detach(), token_list))
             img2 = opt.ImgGen.render(one_hot_to_ascii_level(
                 G(Z_opt.detach(), z_prev, temperature=1 if current_scale != opt.token_insert else 1).detach(),
                 token_list))
-            real_scaled = one_hot_to_ascii_level(real.detach(), token_list)
+            real_scaled = one_hot_to_ascii_level(real1[:, :-1].detach(), token_list)
             img3 = opt.ImgGen.render(real_scaled)
-            # wandb.log({f"G(z)@{current_scale}": wandb.Image(img),
-            #            f"G(z_opt)@{current_scale}": wandb.Image(img2),
-            #            f"real@{current_scale}": wandb.Image(img3)},
-            #           sync=False, commit=False)
+            wandb.log({f"G(z)@{current_scale}": wandb.Image(img),
+                       f"G(z_opt)@{current_scale}": wandb.Image(img2),
+                       f"real@{current_scale}": wandb.Image(img3)},
+                      sync=False, commit=False)
 
-            # real_scaled_path = os.path.join(wandb.run.dir, f"real@{current_scale}.txt")
-            # with open(real_scaled_path, "w") as f:
-            #     f.writelines(real_scaled)
-            # wandb.save(real_scaled_path)
+            real_scaled_path = os.path.join(wandb.run.dir, f"real@{current_scale}.txt")
+            with open(real_scaled_path, "w") as f:
+                f.writelines(real_scaled)
+            wandb.save(real_scaled_path)
 
         # Learning Rate scheduler step
         schedulerD.step()
         schedulerG.step()
     
     # detector.visualize('z_opt', preprocess(z_opt, fake))
-    div = divergence(real_detection_map, preprocess(opt, z_opt))
+    div = divergence(real_detection_map, preprocess(opt, z_opt, keepSky))
     divergences.append(div)
-    logger.info("divergence(z_opt) = {}", div)
+    # logger.info("divergence(z_opt) = {}", div)
     
     # Save networks
     torch.save(z_opt, "%s/z_opt.pth" % opt.outf)
     save_networks(G, D, z_opt, opt)
-    # wandb.save(opt.outf)
+    wandb.save(opt.outf)
     return z_opt, input_from_prev_scale, G, divergences

@@ -12,7 +12,7 @@ class Level_WDiscriminator(nn.Module):
         super().__init__()
         self.is_cuda = torch.cuda.is_available()
         N = int(opt.nfc)
-        self.head = ConvBlock(opt.nc_current, N, (opt.ker_size, opt.ker_size), 0, 1)  # Padding is done externally
+        self.head = ConvBlock(opt.nc_current+1, N, (opt.ker_size, opt.ker_size), 0, 1)  # Padding is done externally
         self.body = nn.Sequential()
 
         for i in range(opt.num_layer - 2):
