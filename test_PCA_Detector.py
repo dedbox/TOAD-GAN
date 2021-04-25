@@ -147,6 +147,8 @@ def one_hot_to_ascii_level(level, tokens):
 input_names = ['1-1', '1-2', '1-3', '2-1', '3-1', '3-3', '4-1',
                '4-2', '5-1', '5-3', '6-1', '6-2', '6-3', '7-1', '8-1']
 
+kernel_size = (2, 2)
+
 # # render the real levels
 # for input_name in input_names:
 #     opt.input_name = f'lvl_{input_name}.txt'
@@ -179,7 +181,7 @@ detectors = {}
 for input_name in input_names:
     real = reals[input_name]
     detectors[input_name] = PCA_Detector(
-        opt, input_name, reals[input_name], (7, 7))
+        opt, input_name, reals[input_name], kernel_size)
 
 # Compute pairwise divergence
 N = len(input_names)
@@ -188,13 +190,13 @@ for i, input_name1 in enumerate(input_names):
     for j, input_name2 in enumerate(input_names):
         a = detectors[input_name1](reals[input_name1])
         b = detectors[input_name1](reals[input_name2])
-        data[j, i] = np.exp(divergence(a, b)) - 1
+        data[j, i] = divergence(a, b)
 
 plt.imshow(data, interpolation='nearest', extent=[0, 2*N, 0, 2*N])
 plt.xticks([2*i + 1 for i in range(N)], input_names, rotation=45)
 plt.yticks([2*i + 1 for i in range(N)], reversed(input_names))
-# plt.savefig(f'pca-detector-2d-intensities.png',
-#             bbox_inches='tight', pad_inches=0.1)
+plt.savefig(f'pca-detector-2d-intensities.png',
+            bbox_inches='tight', pad_inches=0.1)
 plt.show()
 
 # visualize detector outputs
@@ -203,4 +205,4 @@ for input_name1 in input_names:
         detectors[input_name1].visualize(
             input_name2,
             reals[input_name2],
-            )# rf'PCA_Detector_output\detector_{input_name1}_level_{input_name2}.png')
+            rf'PCA_Detector_output\detector_{input_name1}_level_{input_name2}.png')

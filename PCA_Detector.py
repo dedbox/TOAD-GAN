@@ -19,7 +19,7 @@ def unify_shapes(a, b):
 
 def divergence(a, b):
     A, B = unify_shapes(a, b)
-    return torch.log(1 + torch.linalg.norm(A - B)).item()
+    return torch.linalg.norm(A - B).item() / A.shape[-2]
 
 
 class PCA_Detector:
