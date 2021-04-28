@@ -219,13 +219,13 @@ def train(epoch):
 
 losses = []
 avg_losses = []
-epochs = 1000
+epochs = 35000
 viz_channel = 2
 for epoch in range(1, epochs + 1):
     loss, avg_loss, mu, logvar = train(epoch)
     losses.append(loss)
     avg_losses.append(avg_loss)
-    if(epoch%100==0):
+    if(epoch%10==0):
         print('====> Epoch: {} Average loss: {:.4f}'.format(
                                                          epoch, avg_loss))
 
@@ -243,10 +243,11 @@ for epoch in range(1, epochs + 1):
         n = attributions.shape[1]
 
         fig, axs = plt.subplots(n, 1)
+        fig.figsize = (10, n)
         for i in range(n):
             im = axs[i].imshow(attributions[0, i].detach().cpu().numpy(), cmap='jet')
             axs[i].axis('off')
-        fig.colorbar(im, ax=axs, shrink=0.85)
+        # fig.colorbar(im, ax=axs, shrink=0.85)
         plt.suptitle(f'VAE {opt.input_name} ch.{viz_channel} ({epoch})')
         plt.savefig(rf'VAE_heatmaps\{opt.input_name.rsplit(".",1)[0]}_ch{viz_channel}_{epoch}.png',
                     bbox_inches='tight', pad_inches=0.1)
