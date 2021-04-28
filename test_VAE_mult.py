@@ -39,6 +39,8 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 
 
+from captum.attr import IntegratedGradients
+
 # Logger init
 logger.remove()
 logger.add(sys.stdout, colorize=True,
@@ -69,7 +71,8 @@ else:
     
 # opt.input_dir = "lvl_1-2.txt"
 real = read_level(opt, None, replace_tokens).to(opt.device)
-real = real.cpu()
+real_orig = real.clone()
+# real = real.cpu()
 # print(real.shape)
 
 # real1 = real[:,:,:,:200]
@@ -97,11 +100,11 @@ flip_patch4 = torch.cat((e,a,e,c,b,f),dim=3)
 # flip_patch = torch.hstack(real_patches[0], real_patches[1])
 # exit()
 real = torch.cat((real,flip_patch1,flip_patch2,flip_patch3, flip_patch4),dim=0)
-plt.figure(1)
+# plt.figure(1)
 n = 12
-for i in range(n):
-    ax = plt.subplot(n,1,i+1)
-    plt.imshow(real[0,i,:,:])
+# for i in range(n):
+#     ax = plt.subplot(n,1,i+1)
+#     plt.imshow(real[0,i,:,:])
 
 # plt.show() #12 patches corresponding to the 12 tokens
 patch_height = 16
@@ -216,68 +219,90 @@ def train(epoch):
 
 losses = []
 avg_losses = []
-epochs = 35000
-# if __name__ == "__main__":
+epochs = 1000
+viz_channel = 2
 for epoch in range(1, epochs + 1):
     loss, avg_loss, mu, logvar = train(epoch)
     losses.append(loss)
     avg_losses.append(avg_loss)
-    # print('mu = ',mu.shape)
-    # print('var = ',logvar.shape)
-    if(epoch%1000==0):
+    if(epoch%100==0):
         print('====> Epoch: {} Average loss: {:.4f}'.format(
                                                          epoch, avg_loss))
-    
-plt.figure(4)
-plt.plot(avg_losses)
 
-    # test(epoch)
-with torch.no_grad():
+    def wrapped_model(inp):
+        outp = model(inp)[0]
+        return outp
 
+    with torch.no_grad():
+        baseline = torch.zeros(real_orig.shape).to(opt.device)
+        ig = IntegratedGradients(wrapped_model)
+        attributions, delta = ig.attribute(real_orig, baseline, target=(0, 2, 0), internal_batch_size=1, return_convergence_delta=True)
+        # print('IG Attributions:', attributions.shape)
+        # print('Convergence Delta:', delta.item())
 
-    K = 1
-    cols = int(np.ceil(np.sqrt(K)))
-    rows = K // cols + 1
-    # print('mu=',mu)
-    # print('var =', logvar)
-    # samples_gen = torch.normal(mu,logvar)
-    # print('gen =',samples_gen)
-    samples = [torch.normal(mu,logvar).to(device) for _ in range(K)]
-    # print('samles=',samples)
-    # samples = np.array([model.decode(sample).cpu().numpy() for sample in samples])
-    samples = torch.tensor([model.decode(sample).cpu().numpy() for sample in samples])
-    
+        n = attributions.shape[1]
 
-    if opt.vae_show:
-        # fig = plt.figure(figsize=(cols * 1.1, rows * 1.4))
-        # grid = ImageGrid(fig, 111, nrows_ncols=(rows, cols), axes_pad=(0.1, 0.4))
-        #Reconstructed Images
-        print(len(samples))
-        samples = samples.reshape((1,12,16,202))
-        print('Reconstructed Images')
-        plt.figure(3)
-        n = 12
+        fig, axs = plt.subplots(n, 1)
         for i in range(n):
-            ax = plt.subplot(n,1,i+1)
-            plt.imshow(samples[0,i,:,:])
+            im = axs[i].imshow(attributions[0, i].detach().cpu().numpy(), cmap='jet')
+            axs[i].axis('off')
+        fig.colorbar(im, ax=axs, shrink=0.85)
+        plt.suptitle(f'VAE {opt.input_name} ch.{viz_channel} ({epoch})')
+        plt.savefig(rf'VAE_heatmaps\{opt.input_name.rsplit(".",1)[0]}_ch{viz_channel}_{epoch}.png',
+                    bbox_inches='tight', pad_inches=0.1)
+        # plt.show()
+        plt.close()
+
+# plt.figure(4)
+# plt.plot(avg_losses)
+
+#     # test(epoch)
+# with torch.no_grad():
 
 
-if opt.vae_save:
-    np.savez(f"vae-{opt.input_name[:-4]}-{opt.hidden_dim}-{opt.latent_dim}", loss=np.array(losses), avg_loss=np.array(avg_losses))
+#     K = 1
+#     cols = int(np.ceil(np.sqrt(K)))
+#     rows = K // cols + 1
+#     # print('mu=',mu)
+#     # print('var =', logvar)
+#     # samples_gen = torch.normal(mu,logvar)
+#     # print('gen =',samples_gen)
+#     samples = [torch.normal(mu,logvar).to(device) for _ in range(K)]
+#     # print('samles=',samples)
+#     # samples = np.array([model.decode(sample).cpu().numpy() for sample in samples])
+#     samples = torch.tensor([model.decode(sample).cpu().numpy() for sample in samples])
+    
+
+#     if opt.vae_show:
+#         # fig = plt.figure(figsize=(cols * 1.1, rows * 1.4))
+#         # grid = ImageGrid(fig, 111, nrows_ncols=(rows, cols), axes_pad=(0.1, 0.4))
+#         #Reconstructed Images
+#         print(len(samples))
+#         samples = samples.reshape((1,12,16,202))
+#         print('Reconstructed Images')
+#         plt.figure(3)
+#         n = 12
+#         for i in range(n):
+#             ax = plt.subplot(n,1,i+1)
+#             plt.imshow(samples[0,i,:,:])
 
 
-ind = torch.argmax(samples, dim = 1)
-hotenc = torch.zeros_like(samples)
+# if opt.vae_save:
+#     np.savez(f"vae-{opt.input_name[:-4]}-{opt.hidden_dim}-{opt.latent_dim}", loss=np.array(losses), avg_loss=np.array(avg_losses))
 
-for x in range(hotenc.shape[2]):
-    for y in range(hotenc.shape[3]):
-        hotenc[0,ind[0,x,y],x,y] = 1
 
-ascii_gen = one_hot_to_ascii_level(hotenc, opt.token_list)
-ascii_real = one_hot_to_ascii_level(real, opt.token_list)
+# ind = torch.argmax(samples, dim = 1)
+# hotenc = torch.zeros_like(samples)
 
-gen_level = opt.ImgGen.render(ascii_gen)
-real_level = opt.ImgGen.render(ascii_real)
+# for x in range(hotenc.shape[2]):
+#     for y in range(hotenc.shape[3]):
+#         hotenc[0,ind[0,x,y],x,y] = 1
 
-gen_level.save(rf"VAE_Gen_levels\multiple_lvls\{epochs}_mult.png")
-real_level.save(rf"VAE_Gen_levels\multiple_lvls\real.png")
+# ascii_gen = one_hot_to_ascii_level(hotenc, opt.token_list)
+# ascii_real = one_hot_to_ascii_level(real, opt.token_list)
+
+# gen_level = opt.ImgGen.render(ascii_gen)
+# real_level = opt.ImgGen.render(ascii_real)
+
+# gen_level.save(rf"VAE_Gen_levels\multiple_lvls\{epochs}_mult.png")
+# real_level.save(rf"VAE_Gen_levels\multiple_lvls\real.png")
