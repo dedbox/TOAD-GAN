@@ -209,7 +209,8 @@ def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scal
             if opt.alpha != 0:  # i. e. we are trying to find an exact recreation of our input in the lat space
                 Z_opt = opt.noise_amp * z_opt + z_prev
                 G_rec = G(Z_opt.detach(), z_prev, temperature=1 if current_scale != opt.token_insert else 1)
-                rec_loss = opt.alpha * F.mse_loss(G_rec, real)
+                div = divergence(real_detection_map, preprocess(opt, G_rec, keepSky))
+                rec_loss = opt.alpha * F.mse_loss(G_rec, real) + div
                 rec_loss.backward(retain_graph=False)  # TODO: Check for unexpected argument retain_graph=True
                 rec_loss = rec_loss.detach()
             else:  # We are not trying to find an exact recreation
