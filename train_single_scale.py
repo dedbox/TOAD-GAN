@@ -17,10 +17,13 @@ from mario.tokens import TOKEN_GROUPS as MARIO_TOKEN_GROUPS
 from mariokart.tokens import TOKEN_GROUPS as MARIOKART_TOKEN_GROUPS
 from models import calc_gradient_penalty, save_networks
 
-
+import numpy as np
 import matplotlib.pyplot as plt
 
 from PCA_Detector import PCA_Detector, unify_shapes, divergence
+
+from captum.attr import LayerGradCam, LayerAttribution  # LayerConductance
+from captum.attr import visualization as viz
 
 
 def update_noise_amplitude(z_prev, real, opt):
@@ -251,11 +254,90 @@ def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scal
         # Learning Rate scheduler step
         schedulerD.step()
         schedulerG.step()
-    
+
     # detector.visualize('z_opt', preprocess(z_opt, fake))
     div = divergence(real_detection_map, preprocess(opt, z_opt, keepSky))
     divergences.append(div)
     # logger.info("divergence(z_opt) = {}", div)
+
+    # visualization config
+    folder_name = 'gradcam'
+    level_name = opt.input_name.rsplit(".", 1)[0].split("_", 1)[1]
+
+    # GradCAM on D
+    camD = LayerGradCam(D, D.tail)
+    real0 = one_hot_to_ascii_level(real, opt.token_list)
+    real0 = opt.ImgGen.render(real0)
+    real0 = np.array(real0)
+    attr = camD.attribute(real1, target=(0, 0, 0), relu_attributions=True)
+    attr = LayerAttribution.interpolate(attr, (real0.shape[0], real0.shape[1]), 'bilinear')
+    attr = attr.permute(2, 3, 1, 0).squeeze(3)
+    attr = attr.detach().cpu().numpy()
+    fig, ax = plt.subplots(1, 1)
+    fig.figsize = (10, 1)
+    ax.imshow(real0, cmap='gray')
+    im = ax.imshow(attr, cmap='jet', alpha=0.5)
+    ax.axis('off')
+    fig.colorbar(im, ax=ax, location='bottom', shrink=0.85)
+    plt.suptitle(f'cGAN {level_name} D(x)@{current_scale} ({step})')
+    plt.savefig(rf'{folder_name}\{level_name}_D_{current_scale}_{step}.png',
+                bbox_inches='tight', pad_inches=0.1)
+    # plt.show()
+    plt.close()
+
+    # GradCAM on G
+    token_names = {
+        '!': 'coin [?]',
+        '#': 'pyramid',
+        '-': 'sky',
+        '1': 'invis. 1 up',
+        'L': '1 up',
+        '@': 'special [?]',
+        'Q': 'coin [?]',
+        'C': 'coin brick',
+        'S': 'normal brick',
+        'U': 'mushroom brick',
+        'X': 'ground',
+        'E': 'goomba',
+        'g': 'goomba',
+        'k': 'green koopa',
+        't': 'pipe',
+        '%': 'platform',
+        '|': 'platform bg',
+        'R': 'winged red koopa',
+        'o': 'coin',
+        'r': 'red koopa',
+        'T': 'plant pipe'
+    }
+    def wrappedG(z):
+        return G(z, z_opt)
+    camG = LayerGradCam(wrappedG, G.tail[0])
+    z_cam = generate_spatial_noise([1, opt.nc_current, nzx, nzy], device=opt.device)
+    z_cam = pad_noise(z_cam)
+    attrs = []
+    for i in range(opt.nc_current):
+        attr = camG.attribute(z_cam, target=(i, 0, 0))
+        attr = LayerAttribution.interpolate(attr, (real0.shape[0], real0.shape[1]), 'bilinear')
+        attr = attr.permute(2, 3, 1, 0).squeeze(3)
+        attr = attr.detach().cpu().numpy()
+        attrs.append(attr)
+    fig, axs = plt.subplots(opt.nc_current, 1)
+    fig.figsize = (10, opt.nc_current)
+    for i in range(opt.nc_current):
+        axs[i].axis('off')
+        axs[i].text(-0.1, 0.5, token_names[opt.token_list[i]],
+                    rotation=0,
+                    verticalalignment='center',
+                    horizontalalignment='right',
+                    transform=axs[i].transAxes)
+        axs[i].imshow(real0, cmap='gray')
+        im = axs[i].imshow(attrs[i], cmap='jet', alpha=0.6)
+    fig.colorbar(im, ax=axs, shrink=0.85)
+    plt.suptitle(f'cGAN {level_name} G(z)@{current_scale} ({step})')
+    plt.savefig(rf'{folder_name}\{level_name}_G_{current_scale}_{step}.png',
+                bbox_inches='tight', pad_inches=0.1)
+    # plt.show()
+    plt.close()
     
     # Save networks
     torch.save(z_opt, "%s/z_opt.pth" % opt.outf)
