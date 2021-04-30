@@ -44,6 +44,10 @@ def preprocess(opt, level, keepSky=False):
     return level
 
 
+def rgb2gray(rgb):
+    return np.dot(rgb[...,:3], [0.2989, 0.5870, 0.1140]) / 255
+
+
 def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scale, noise_amplitudes, opt):
     """ Train one scale. D and G are the current discriminator and generator, reals are the scaled versions of the
     original level, generators and noise_maps contain information from previous scales and will receive information in
@@ -59,17 +63,17 @@ def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scal
     real0 = preprocess(opt, real, keepSky)
     N, C, H, W = real0.shape
 
-    # print("real0", real0.shape)
     scale = opt.scales[current_scale] if current_scale < len(opt.scales) else 1
-    # print("AAA", current_scale, opt.scales, int(7 * opt.scales[current_scale]))
 
-    detector = PCA_Detector(opt, 'real', real0, kernel_dims)
-    real_detection_map = detector(real0)
-    detection_scale = torch.max(real_detection_map)
-    real_detection_map /= detection_scale
-    real1 = torch.cat([real, F.interpolate(real_detection_map, (H, W))], dim=1)
-    divergences = []
-    # logger.info("real_detection_map.shape = {}", real_detection_map.shape)
+    if opt.cgan:
+        detector = PCA_Detector(opt, 'real', real0, kernel_dims)
+        real_detection_map = detector(real0)
+        detection_scale = 0.1
+        real_detection_map *= detection_scale
+        real1 = torch.cat([real, F.interpolate(real_detection_map, (H, W))], dim=1)
+        divergences = []
+    else:
+        real1 = real
 
     if opt.game == 'mario':
         token_group = MARIO_TOKEN_GROUPS
@@ -165,9 +169,12 @@ def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scal
             fake = G(noise.detach(), prev, temperature=1 if current_scale != opt.token_insert else 1)
 
             fake0 = preprocess(opt, fake, keepSky)
-            Nf, Cf, Hf, Wf = fake0.shape
-            fake_detection_map = detector(fake0) / detection_scale
-            fake1 = torch.cat([fake, F.interpolate(fake_detection_map, (Hf, Wf))], dim=1)
+            if opt.cgan:
+                Nf, Cf, Hf, Wf = fake0.shape
+                fake_detection_map = detector(fake0) * detection_scale
+                fake1 = torch.cat([fake, F.interpolate(fake_detection_map, (Hf, Wf))], dim=1)
+            else:
+                fake1 = fake
 
             # Then run the result through the discriminator
             output = D(fake1.detach())
@@ -199,8 +206,12 @@ def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scal
 
             fake0 = preprocess(opt, fake, keepSky)
             Nf, Cf, Hf, Wf = fake0.shape
-            fake_detection_map = detector(fake0) / detection_scale
-            fake1 = torch.cat([fake, F.interpolate(fake_detection_map, (Hf, Wf))], dim=1)
+
+            if opt.cgan:
+                fake_detection_map = detector(fake0) * detection_scale
+                fake1 = torch.cat([fake, F.interpolate(fake_detection_map, (Hf, Wf))], dim=1)
+            else:
+                fake1 = fake
 
             output = D(fake1)
 
@@ -209,8 +220,10 @@ def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scal
             if opt.alpha != 0:  # i. e. we are trying to find an exact recreation of our input in the lat space
                 Z_opt = opt.noise_amp * z_opt + z_prev
                 G_rec = G(Z_opt.detach(), z_prev, temperature=1 if current_scale != opt.token_insert else 1)
-                div = divergence(real_detection_map, preprocess(opt, G_rec, keepSky))
-                rec_loss = opt.alpha * F.mse_loss(G_rec, real) + div
+                rec_loss = opt.alpha * F.mse_loss(G_rec, real)
+                if opt.cgan:
+                    div = divergence(real_detection_map, preprocess(opt, G_rec, keepSky))
+                    rec_loss += div
                 rec_loss.backward(retain_graph=False)  # TODO: Check for unexpected argument retain_graph=True
                 rec_loss = rec_loss.detach()
             else:  # We are not trying to find an exact recreation
@@ -224,7 +237,6 @@ def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scal
         divergences.append(div)
         # logger.info("divergence(fake) = {}", div)
         if step % 10 == 0:
-            # detector.visualize('fake', preprocess(opt, fake))
             wandb.log({f"noise_amplitude@{current_scale}": opt.noise_amp,
                        f"rec_loss@{current_scale}": rec_loss.item()},
                       step=step, sync=False, commit=True)
@@ -256,10 +268,9 @@ def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scal
         schedulerD.step()
         schedulerG.step()
 
-    # detector.visualize('z_opt', preprocess(z_opt, fake))
-    div = divergence(real_detection_map, preprocess(opt, z_opt, keepSky))
-    divergences.append(div)
-    # logger.info("divergence(z_opt) = {}", div)
+    if opt.cgan:
+        div = divergence(real_detection_map, preprocess(opt, z_opt, keepSky))
+        divergences.append(div)
 
     # visualization config
     folder_name = 'gradcam'
@@ -276,7 +287,7 @@ def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scal
     attr = attr.detach().cpu().numpy()
     fig, ax = plt.subplots(1, 1)
     fig.figsize = (10, 1)
-    ax.imshow(real0, cmap='gray')
+    ax.imshow(rgb2gray(real0), cmap='gray', vmin=0, vmax=1)
     im = ax.imshow(attr, cmap='jet', alpha=0.5)
     ax.axis('off')
     fig.colorbar(im, ax=ax, location='bottom', shrink=0.85)
@@ -317,7 +328,7 @@ def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scal
     z_cam = pad_noise(z_cam)
     attrs = []
     for i in range(opt.nc_current):
-        attr = camG.attribute(z_cam, target=(i, 0, 0))
+        attr = camG.attribute(z_cam, target=(i, 0, 0), relu_attributions=True)
         attr = LayerAttribution.interpolate(attr, (real0.shape[0], real0.shape[1]), 'bilinear')
         attr = attr.permute(2, 3, 1, 0).squeeze(3)
         attr = attr.detach().cpu().numpy()
@@ -331,8 +342,8 @@ def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scal
                     verticalalignment='center',
                     horizontalalignment='right',
                     transform=axs[i].transAxes)
-        axs[i].imshow(real0, cmap='gray')
-        im = axs[i].imshow(attrs[i], cmap='jet', alpha=0.6)
+        axs[i].imshow(rgb2gray(real0), cmap='gray', vmin=0, vmax=1)
+        im = axs[i].imshow(attrs[i], cmap='jet', alpha=0.5)
     fig.colorbar(im, ax=axs, shrink=0.85)
     plt.suptitle(f'cGAN {level_name} G(z)@{current_scale} ({step})')
     plt.savefig(rf'{folder_name}\{level_name}_G_{current_scale}_{step}.png',

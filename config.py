@@ -51,6 +51,7 @@ def get_arguments():
     parser.add_argument("--token_insert", type=int, help="layer in which token groupings will be split out "
                                                          "(<-2 means no grouping at all)", default=-2)
 
+    parser.add_argument("--cgan", type=bool, default=True, help="enable GAN conditioning")
     parser.add_argument("--hidden-dim", type=int, default=24, help="size of the VAE's first hidden layer")
     parser.add_argument("--latent-dim", type=int, default=7, help="size of the VAE's second hidden layer")
     parser.add_argument("--vae-epochs", type=int, default=10, help="number of VAE traning epochs")
