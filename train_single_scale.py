@@ -299,13 +299,22 @@ def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scal
 
     # GradCAM on G
     token_names = {
+        'M': 'Mario start',
+        'F': 'Mario finish',
+        'y': 'spiky',
+        'Y': 'winged spiky',
+        'k': 'green koopa',
+        'K': 'winged green koopa',
         '!': 'coin [?]',
         '#': 'pyramid',
         '-': 'sky',
         '1': 'invis. 1 up',
+        '2': 'invis. coin',
         'L': '1 up',
+        '?': 'special [?]',
         '@': 'special [?]',
         'Q': 'coin [?]',
+        '!': 'coin [?]',
         'C': 'coin brick',
         'S': 'normal brick',
         'U': 'mushroom brick',
@@ -313,13 +322,21 @@ def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scal
         'E': 'goomba',
         'g': 'goomba',
         'k': 'green koopa',
-        't': 'pipe',
         '%': 'platform',
         '|': 'platform bg',
+        'r': 'red koopa',
         'R': 'winged red koopa',
         'o': 'coin',
-        'r': 'red koopa',
-        'T': 'plant pipe'
+        't': 'pipe',
+        'T': 'plant pipe',
+        '*': 'bullet bill',
+        '<': 'pipe top left',
+        '>': 'pipe top right',
+        '[': 'pipe left',
+        ']': 'pipe right',
+        'B': 'bullet bill head',
+        'b': 'bullet bill body',
+        'D': 'used block',
     }
     def wrappedG(z):
         return G(z, z_opt)
