@@ -195,14 +195,17 @@ for i, input_name1 in enumerate(input_names):
 plt.imshow(data, interpolation='nearest', extent=[0, 2*N, 0, 2*N])
 plt.xticks([2*i + 1 for i in range(N)], input_names, rotation=45)
 plt.yticks([2*i + 1 for i in range(N)], reversed(input_names))
+
+plt.colorbar(shrink=0.85)
+
 plt.savefig(f'pca-detector-2d-intensities.png',
             bbox_inches='tight', pad_inches=0.1)
 plt.show()
 
-# visualize detector outputs
-for input_name1 in input_names:
-    for input_name2 in input_names:
-        detectors[input_name1].visualize(
-            input_name2,
-            reals[input_name2],
-            rf'PCA_Detector_output\detector_{input_name1}_level_{input_name2}.png')
+# # visualize detector outputs
+# for input_name1 in input_names:
+#     for input_name2 in input_names:
+#         detectors[input_name1].visualize(
+#             input_name2,
+#             reals[input_name2],
+#             rf'PCA_Detector_output\detector_{input_name1}_level_{input_name2}.png')
