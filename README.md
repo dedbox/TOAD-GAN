@@ -9,9 +9,34 @@ If you are using this code in your own project, please cite our paper:
 }
 ```
 
+# EECS545 Project Addendum
+
+## Our Modifications
+
+Our VAE implementation is in the file `VAE_bootstrap.py`, which is a self-contained script. To run it, run `python VAE_bootstrap.py` from the command line or hit the "play" button in Spyder.
+
+Our conditional GAN extensions are implemented in `train_single_scale.py` and `PCA_Detector.py`. The former file belongs to the existing TOAD-GAN code base. For a complete list of our modifications to it, please refer to the section for `train_single_scale.py` under the "Files Changed" tab at the following GitHub diff page:
+
+[https://github.com/dedbox/TOAD-GAN/compare/dedbox:baseline...submitted#diff-ed183d67207df065a11e1289f19d34cc2abbc5448dea952683cfe9728c342b95](https://github.com/dedbox/TOAD-GAN/compare/dedbox:baseline...submitted#diff-ed183d67207df065a11e1289f19d34cc2abbc5448dea952683cfe9728c342b95)
+
+## WARNING: Does not work with Python 3.9
+
+Due to bugs in the upstream code base, TOAD-GAN refuses to run without GPU-accelerated PyTorch and an outdated version of the WandB.ai service API. We have updated the `requirements.txt` file to make installation easier with currently available packages.
+
+Due to bugs in the PyTorch code base, there is no compatible pypi package for GPU-accelerated PyTorch on python 3.9. If you get package conflicts during package installation (see instructions below), make sure your python is version 3.8 or older.
+
+## WARNING: Pipenv limitation
+
+The `pipenv` virtual environment manager does not support the `-f` command line option needed to install GPU-accelerated PyTorch. To install PyTorch with GPU acceleration, first run the "official" command recommended by [pytorch.org](https://pytorch.org/), then the remaining dependencies can be installed with `pipenv install`.
+
+If all else fails, there are two options:
+
+1. Remove the `requirements.txt` file, install pytorch manually, then run `python main.py` and install missing packages as they are reported.
+2. Manually install the `.whl` files for the desired version of pytorch from [https://download.pytorch.org/whl/torch_stable.html](https://download.pytorch.org/whl/torch_stable.html), then install the remaining dependencies as described below.
+
 # TOAD-GAN
 
-Official pytorch implementation of the paper: "TOAD-GAN: Coherent Style Level Generation from a Single Example"
+Unofficial pytorch implementation of the paper: "TOAD-GAN: Coherent Style Level Generation from a Single Example"
 For more information on TOAD-GAN, please refer to the paper ([arxiv](https://arxiv.org/pdf/2008.01531.pdf)).
 
 ![Teaser](teaser.png)
